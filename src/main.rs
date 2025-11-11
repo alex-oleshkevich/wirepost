@@ -1,14 +1,18 @@
 use std::{
+    collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 use anyhow::{Context, Result, anyhow};
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, Parser, ValueEnum};
 use lettre::{
     SmtpTransport, Transport,
     message::{
         Attachment, Mailbox, Message, MultiPart, SinglePart,
+        dkim::{DkimConfig, DkimSigningAlgorithm, DkimSigningKey},
         header::{ContentType, HeaderName, HeaderValue},
     },
     transport::smtp::authentication::Credentials,
@@ -17,7 +21,12 @@ use mime_guess::mime;
 use url::Url;
 
 #[derive(Parser, Debug)]
-#[command(name = "mail", about = "Send an email via SMTP", version)]
+#[command(
+    name = "mail",
+    about = "Send an email via SMTP",
+    version,
+    after_help = "Environment variables: MAIL_URL supplies the DSN, MAIL_FROM supplies the sender address."
+)]
 struct Args {
     /// SMTP DSN, e.g. smtp://user:pass@example.com:587
     #[arg(long)]
@@ -35,8 +44,8 @@ struct Args {
     #[arg(long)]
     pass: Option<String>,
     /// Sender mailbox
-    #[arg(long, required = true)]
-    from: String,
+    #[arg(long)]
+    from: Option<String>,
     /// Primary recipients (repeatable)
     #[arg(long = "to", action = ArgAction::Append, required = true)]
     to: Vec<String>,
@@ -64,6 +73,48 @@ struct Args {
     /// Additional headers in the form `Name: Value` (repeatable)
     #[arg(long = "header", action = ArgAction::Append)]
     headers: Vec<String>,
+    /// Template variables used inside subject/body placeholders `{{key}}`
+    #[arg(long = "var", action = ArgAction::Append)]
+    vars: Vec<String>,
+    /// Verbose logging for SMTP activity
+    #[arg(long)]
+    verbose: bool,
+    /// Maximum SMTP send attempts
+    #[arg(long = "max-attempts", default_value_t = 3)]
+    max_attempts: u32,
+    /// Initial backoff delay in milliseconds
+    #[arg(long = "backoff-ms", default_value_t = 1_000)]
+    backoff_ms: u64,
+    /// Backoff multiplier applied after each failure
+    #[arg(long = "backoff-factor", default_value_t = 2.0)]
+    backoff_factor: f64,
+    /// DKIM selector (requires domain and key)
+    #[arg(long = "dkim-selector")]
+    dkim_selector: Option<String>,
+    /// DKIM domain (requires selector and key)
+    #[arg(long = "dkim-domain")]
+    dkim_domain: Option<String>,
+    /// Path to DKIM private key (PKCS#1 for RSA or base64 for ed25519)
+    #[arg(long = "dkim-key")]
+    dkim_key: Option<PathBuf>,
+    /// DKIM signing algorithm
+    #[arg(long = "dkim-algorithm", value_enum, default_value = "rsa")]
+    dkim_algorithm: DkimAlgorithm,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum DkimAlgorithm {
+    Rsa,
+    Ed25519,
+}
+
+impl DkimAlgorithm {
+    fn to_lettre(self) -> DkimSigningAlgorithm {
+        match self {
+            DkimAlgorithm::Rsa => DkimSigningAlgorithm::Rsa,
+            DkimAlgorithm::Ed25519 => DkimSigningAlgorithm::Ed25519,
+        }
+    }
 }
 
 struct Connection {
@@ -77,14 +128,39 @@ struct Auth {
     pass: String,
 }
 
+struct RenderedContent {
+    subject: String,
+    text: Option<String>,
+    html: Option<String>,
+    headers: Vec<String>,
+}
+
+type TemplateVars = HashMap<String, String>;
+
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.max_attempts == 0 {
+        return Err(anyhow!("--max-attempts must be at least 1"));
+    }
+
+    let vars = parse_vars(&args.vars)?;
+    let rendered = render_content(&args, &vars);
     let conn = resolve_connection(&args)?;
-    let message = build_message(&args)?;
+    let from = resolve_from(&args)?;
+    log_verbose(
+        args.verbose,
+        &format!("SMTP target {}:{}", conn.host, conn.port),
+    );
+
+    let mut message = build_message(&args, &rendered, &from)?;
+    if let Some(dkim_config) = load_dkim_config(&args)? {
+        log_verbose(args.verbose, "Applying DKIM signature");
+        message.sign(&dkim_config);
+    }
 
     if args.print {
-        let rendered = message.formatted();
-        println!("{}", String::from_utf8_lossy(&rendered));
+        let output = message.formatted();
+        println!("{}", String::from_utf8_lossy(&output));
     }
 
     let mut builder = SmtpTransport::builder_dangerous(&conn.host).port(conn.port);
@@ -93,9 +169,7 @@ fn main() -> Result<()> {
     }
     let mailer = builder.build();
 
-    mailer
-        .send(&message)
-        .context("failed to send message via SMTP")?;
+    send_with_retry(&mailer, &message, &args)?;
 
     println!("Email sent");
     Ok(())
@@ -154,8 +228,8 @@ fn parse_dsn(dsn: &str) -> Result<Connection> {
     Ok(Connection { host, port, auth })
 }
 
-fn build_message(args: &Args) -> Result<Message> {
-    let mut builder = Message::builder().from(parse_mailbox(&args.from)?);
+fn build_message(args: &Args, rendered: &RenderedContent, from: &str) -> Result<Message> {
+    let mut builder = Message::builder().from(parse_mailbox(from)?);
 
     for addr in &args.to {
         builder = builder.to(parse_mailbox(addr)?);
@@ -167,10 +241,10 @@ fn build_message(args: &Args) -> Result<Message> {
         builder = builder.bcc(parse_mailbox(addr)?);
     }
 
-    builder = apply_extra_headers(builder, &args.headers)?;
-    builder = builder.subject(args.subject.clone());
+    builder = apply_extra_headers(builder, &rendered.headers)?;
+    builder = builder.subject(rendered.subject.clone());
 
-    let base = compose_base_body(args)?;
+    let base = compose_base_body(rendered)?;
     let email = if args.attachments.is_empty() {
         match base {
             BodyPart::Single(part) => builder.singlepart(part)?,
@@ -195,8 +269,8 @@ enum BodyPart {
     Multi(MultiPart),
 }
 
-fn compose_base_body(args: &Args) -> Result<BodyPart> {
-    match (&args.text, &args.html) {
+fn compose_base_body(rendered: &RenderedContent) -> Result<BodyPart> {
+    match (&rendered.text, &rendered.html) {
         (Some(text), Some(html)) => {
             let alternative = MultiPart::alternative()
                 .singlepart(SinglePart::plain(text.clone()))
@@ -244,4 +318,120 @@ fn apply_extra_headers(
         builder = builder.raw_header(HeaderValue::new(header_name, trimmed_value.to_string()));
     }
     Ok(builder)
+}
+
+fn parse_vars(entries: &[String]) -> Result<TemplateVars> {
+    let mut vars = HashMap::new();
+    for entry in entries {
+        let (key, value) = entry
+            .split_once('=')
+            .ok_or_else(|| anyhow!("invalid --var, expected key=value"))?;
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(anyhow!("template variable names cannot be empty"));
+        }
+        vars.insert(key.to_string(), value.to_string());
+    }
+    Ok(vars)
+}
+
+fn apply_template(input: &str, vars: &TemplateVars) -> String {
+    let mut rendered = input.to_string();
+    for (key, value) in vars {
+        let needle = format!("{{{{{key}}}}}");
+        rendered = rendered.replace(&needle, value);
+    }
+    rendered
+}
+
+fn render_content(args: &Args, vars: &TemplateVars) -> RenderedContent {
+    RenderedContent {
+        subject: apply_template(&args.subject, vars),
+        text: args.text.as_ref().map(|text| apply_template(text, vars)),
+        html: args.html.as_ref().map(|html| apply_template(html, vars)),
+        headers: args
+            .headers
+            .iter()
+            .map(|header| apply_template(header, vars))
+            .collect(),
+    }
+}
+
+fn resolve_from(args: &Args) -> Result<String> {
+    if let Some(from) = &args.from {
+        if !from.trim().is_empty() {
+            return Ok(from.clone());
+        }
+    }
+    if let Ok(env_from) = env::var("MAIL_FROM") {
+        if !env_from.trim().is_empty() {
+            return Ok(env_from);
+        }
+    }
+    Err(anyhow!("provide --from or set MAIL_FROM"))
+}
+
+fn load_dkim_config(args: &Args) -> Result<Option<DkimConfig>> {
+    match (&args.dkim_selector, &args.dkim_domain, &args.dkim_key) {
+        (None, None, None) => Ok(None),
+        (Some(selector), Some(domain), Some(path)) => {
+            let key = fs::read_to_string(path)
+                .with_context(|| format!("failed to read DKIM key {}", path.display()))?;
+            let signing_key = DkimSigningKey::new(&key, args.dkim_algorithm.to_lettre())
+                .context("failed to parse DKIM signing key")?;
+            Ok(Some(DkimConfig::default_config(
+                selector.clone(),
+                domain.clone(),
+                signing_key,
+            )))
+        }
+        _ => Err(anyhow!(
+            "--dkim-selector, --dkim-domain, and --dkim-key must be provided together"
+        )),
+    }
+}
+
+fn send_with_retry(mailer: &SmtpTransport, message: &Message, args: &Args) -> Result<()> {
+    let mut attempt = 1;
+    let mut delay = Duration::from_millis(args.backoff_ms.max(1));
+    loop {
+        log_verbose(args.verbose, &format!("Sending attempt {attempt}"));
+        match mailer.send(message) {
+            Ok(_) => {
+                log_verbose(
+                    args.verbose,
+                    &format!("SMTP send succeeded on attempt {attempt}"),
+                );
+                return Ok(());
+            }
+            Err(err) => {
+                let error = anyhow!(err);
+                if attempt >= args.max_attempts {
+                    return Err(error).context("failed to send message via SMTP");
+                }
+                log_verbose(
+                    args.verbose,
+                    &format!(
+                        "Attempt {attempt} failed: {error}. Retrying in {}ms",
+                        delay.as_millis()
+                    ),
+                );
+                thread::sleep(delay);
+                delay = next_delay(delay, args.backoff_factor);
+                attempt += 1;
+            }
+        }
+    }
+}
+
+fn next_delay(current: Duration, factor: f64) -> Duration {
+    let clamped = if factor < 1.0 { 1.0 } else { factor };
+    let millis = ((current.as_millis() as f64) * clamped).round() as u64;
+    Duration::from_millis(millis.max(1))
+}
+
+fn log_verbose(enabled: bool, message: &str) {
+    if enabled {
+        eprintln!("[mail] {message}");
+    }
 }
