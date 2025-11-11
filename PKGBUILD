@@ -8,7 +8,7 @@ license=('custom')
 provides=('wirepost')
 conflicts=('wirepost' 'wirepost-git')
 depends=('gcc-libs' 'openssl' 'ca-certificates')
-source=("wirepost-linux-x86_64.tar.gz::https://github.com/alex/wirepost/releases/download/v${pkgver}/wirepost-linux-x86_64.tar.gz")
+source=("wirepost-linux-x86_64.tar.gz::https://github.com/alex-oleshkevich/wirepost/releases/download/v${pkgver}/wirepost-linux-x86_64.tar.gz")
 noextract=('wirepost-linux-x86_64.tar.gz')
 sha256sums=('SKIP')
 
