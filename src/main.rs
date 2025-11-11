@@ -70,17 +70,11 @@ struct Connection {
     host: String,
     port: u16,
     auth: Option<Auth>,
-    security: TransportSecurity,
 }
 
 struct Auth {
     user: String,
     pass: String,
-}
-
-enum TransportSecurity {
-    Plain,
-    TlsWrapper,
 }
 
 fn main() -> Result<()> {
@@ -93,12 +87,7 @@ fn main() -> Result<()> {
         println!("{}", String::from_utf8_lossy(&rendered));
     }
 
-    let mut builder = match conn.security {
-        TransportSecurity::TlsWrapper => SmtpTransport::relay(&conn.host)
-            .with_context(|| format!("failed to configure relay for {}", conn.host))?
-            .port(conn.port),
-        TransportSecurity::Plain => SmtpTransport::builder_dangerous(&conn.host).port(conn.port),
-    };
+    let mut builder = SmtpTransport::builder_dangerous(&conn.host).port(conn.port);
     if let Some(auth) = &conn.auth {
         builder = builder.credentials(Credentials::new(auth.user.clone(), auth.pass.clone()));
     }
@@ -135,25 +124,22 @@ fn resolve_connection(args: &Args) -> Result<Connection> {
             host,
             port,
             auth: Some(Auth { user, pass }),
-            security: TransportSecurity::TlsWrapper,
         })
     }
 }
 
 fn parse_dsn(dsn: &str) -> Result<Connection> {
-    let url = Url::parse(dsn).with_context(|| format!("invalid DSN: {dsn}"))?;
-    let (security, default_port) = match url.scheme() {
-        "smtp" => (TransportSecurity::Plain, 587),
-        "smtps" => (TransportSecurity::TlsWrapper, 465),
-        other => {
-            return Err(anyhow!("unsupported DSN scheme: {other}"));
-        }
+    let normalized = if dsn.contains("://") {
+        dsn.to_string()
+    } else {
+        format!("smtp://{dsn}")
     };
+    let url = Url::parse(&normalized).with_context(|| format!("invalid DSN: {dsn}"))?;
     let host = url
         .host_str()
         .ok_or_else(|| anyhow!("DSN must include host"))?
         .to_string();
-    let port = url.port().unwrap_or(default_port);
+    let port = url.port().unwrap_or(587);
     let user = url.username().to_string();
     let auth = if user.is_empty() {
         None
@@ -165,12 +151,7 @@ fn parse_dsn(dsn: &str) -> Result<Connection> {
         Some(Auth { user, pass })
     };
 
-    Ok(Connection {
-        host,
-        port,
-        auth,
-        security,
-    })
+    Ok(Connection { host, port, auth })
 }
 
 fn build_message(args: &Args) -> Result<Message> {
