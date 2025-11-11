@@ -3,13 +3,17 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Lean CLI for sending SMTP mail with templating, retries, and DKIM"
 arch=('x86_64')
-url="https://github.com/alex/mailer"
+_repo_url=$(git config --get remote.origin.url 2>/dev/null)
+if [[ -z "$_repo_url" ]]; then
+  _repo_url="https://github.com/alex/mailer.git"
+fi
+url="${_repo_url%.git}"
 license=('custom')
 provides=('mailer')
 conflicts=('mailer')
 depends=('gcc-libs' 'openssl' 'ca-certificates')
 makedepends=('cargo' 'git')
-source=("${pkgname}::git+${url}.git")
+source=("${pkgname}::git+${_repo_url}")
 sha256sums=('SKIP')
 
 pkgver() {
