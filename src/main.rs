@@ -22,7 +22,7 @@ use url::Url;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "mail",
+    name = "wirepost",
     about = "Send an email via SMTP",
     version,
     after_help = "Environment variables: MAIL_URL supplies the DSN, MAIL_FROM supplies the sender address."
@@ -167,11 +167,11 @@ fn main() -> Result<()> {
     if let Some(auth) = &conn.auth {
         builder = builder.credentials(Credentials::new(auth.user.clone(), auth.pass.clone()));
     }
-    let mailer = builder.build();
+    let wirepost = builder.build();
 
-    send_with_retry(&mailer, &message, &args)?;
+    send_with_retry(&wirepost, &message, &args)?;
 
-    println!("Email sent");
+    println!("Ewirepost sent");
     Ok(())
 }
 
@@ -229,23 +229,23 @@ fn parse_dsn(dsn: &str) -> Result<Connection> {
 }
 
 fn build_message(args: &Args, rendered: &RenderedContent, from: &str) -> Result<Message> {
-    let mut builder = Message::builder().from(parse_mailbox(from)?);
+    let mut builder = Message::builder().from(parse_wirepostbox(from)?);
 
     for addr in &args.to {
-        builder = builder.to(parse_mailbox(addr)?);
+        builder = builder.to(parse_wirepostbox(addr)?);
     }
     for addr in &args.cc {
-        builder = builder.cc(parse_mailbox(addr)?);
+        builder = builder.cc(parse_wirepostbox(addr)?);
     }
     for addr in &args.bcc {
-        builder = builder.bcc(parse_mailbox(addr)?);
+        builder = builder.bcc(parse_wirepostbox(addr)?);
     }
 
     builder = apply_extra_headers(builder, &rendered.headers)?;
     builder = builder.subject(rendered.subject.clone());
 
     let base = compose_base_body(rendered)?;
-    let email = if args.attachments.is_empty() {
+    let ewirepost = if args.attachments.is_empty() {
         match base {
             BodyPart::Single(part) => builder.singlepart(part)?,
             BodyPart::Multi(multi) => builder.multipart(multi)?,
@@ -261,7 +261,7 @@ fn build_message(args: &Args, rendered: &RenderedContent, from: &str) -> Result<
         builder.multipart(mixed)?
     };
 
-    Ok(email)
+    Ok(ewirepost)
 }
 
 enum BodyPart {
@@ -283,10 +283,10 @@ fn compose_base_body(rendered: &RenderedContent) -> Result<BodyPart> {
     }
 }
 
-fn parse_mailbox(value: &str) -> Result<Mailbox> {
+fn parse_wirepostbox(value: &str) -> Result<Mailbox> {
     value
         .parse()
-        .with_context(|| format!("invalid email address: {value}"))
+        .with_context(|| format!("invalid ewirepost address: {value}"))
 }
 
 fn load_attachment(path: &Path) -> Result<SinglePart> {
@@ -391,12 +391,12 @@ fn load_dkim_config(args: &Args) -> Result<Option<DkimConfig>> {
     }
 }
 
-fn send_with_retry(mailer: &SmtpTransport, message: &Message, args: &Args) -> Result<()> {
+fn send_with_retry(wirepost: &SmtpTransport, message: &Message, args: &Args) -> Result<()> {
     let mut attempt = 1;
     let mut delay = Duration::from_millis(args.backoff_ms.max(1));
     loop {
         log_verbose(args.verbose, &format!("Sending attempt {attempt}"));
-        match mailer.send(message) {
+        match wirepost.send(message) {
             Ok(_) => {
                 log_verbose(
                     args.verbose,
@@ -432,6 +432,6 @@ fn next_delay(current: Duration, factor: f64) -> Duration {
 
 fn log_verbose(enabled: bool, message: &str) {
     if enabled {
-        eprintln!("[mail] {message}");
+        eprintln!("[wirepost] {message}");
     }
 }

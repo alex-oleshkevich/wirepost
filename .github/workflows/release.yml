@@ -20,37 +20,37 @@ jobs:
             os: ubuntu-latest
             target: ""
             use_cross: false
-            artifact: mailer-linux-x86_64
-            package: mailer-linux-x86_64.tar.gz
-            binary_path: target/release/mailer
+            artifact: wirepost-linux-x86_64
+            package: wirepost-linux-x86_64.tar.gz
+            binary_path: target/release/wirepost
           - name: linux-aarch64
             os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             use_cross: true
-            artifact: mailer-linux-aarch64
-            package: mailer-linux-aarch64.tar.gz
-            binary_path: target/aarch64-unknown-linux-gnu/release/mailer
+            artifact: wirepost-linux-aarch64
+            package: wirepost-linux-aarch64.tar.gz
+            binary_path: target/aarch64-unknown-linux-gnu/release/wirepost
           - name: macos-x86_64
             os: macos-13
             target: ""
             use_cross: false
-            artifact: mailer-macos-x86_64
-            package: mailer-macos-x86_64.tar.gz
-            binary_path: target/release/mailer
+            artifact: wirepost-macos-x86_64
+            package: wirepost-macos-x86_64.tar.gz
+            binary_path: target/release/wirepost
           - name: macos-aarch64
             os: macos-14
             target: ""
             use_cross: false
-            artifact: mailer-macos-aarch64
-            package: mailer-macos-aarch64.tar.gz
-            binary_path: target/release/mailer
+            artifact: wirepost-macos-aarch64
+            package: wirepost-macos-aarch64.tar.gz
+            binary_path: target/release/wirepost
           - name: windows-x86_64
             os: windows-latest
             target: ""
             use_cross: false
-            artifact: mailer-windows-x86_64
-            package: mailer-windows-x86_64.zip
-            binary_path: target\\release\\mailer.exe
+            artifact: wirepost-windows-x86_64
+            package: wirepost-windows-x86_64.zip
+            binary_path: target\\release\\wirepost.exe
 
     steps:
       - name: Checkout
@@ -103,7 +103,7 @@ jobs:
           ARTIFACT="${{ matrix.artifact }}"
           PACKAGE="${{ matrix.package }}"
           mkdir -p dist/${ARTIFACT}
-          cp "${{ matrix.binary_path }}" "dist/${ARTIFACT}/mailer"
+          cp "${{ matrix.binary_path }}" "dist/${ARTIFACT}/wirepost"
           tar -C dist -czf "${PACKAGE}" "${ARTIFACT}"
 
       - name: Package artifact (Windows)
@@ -113,7 +113,7 @@ jobs:
           $artifact = "${{ matrix.artifact }}"
           $package = "${{ matrix.package }}"
           New-Item -ItemType Directory -Path "dist/$artifact" -Force | Out-Null
-          Copy-Item "${{ matrix.binary_path }}" "dist/$artifact/mailer.exe"
+          Copy-Item "${{ matrix.binary_path }}" "dist/$artifact/wirepost.exe"
           Compress-Archive -Path "dist/$artifact" -DestinationPath $package
 
       - name: Upload artifact
@@ -134,7 +134,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: mailer-*
+          pattern: wirepost-*
           path: artifacts
           merge-multiple: true
 

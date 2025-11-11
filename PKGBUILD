@@ -1,19 +1,19 @@
-pkgname=mailer-bin
+pkgname=wirepost-bin
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Lean CLI for sending SMTP mail with templating, retries, and DKIM"
 arch=('x86_64')
-url="https://github.com/alex/mailer"
+url="https://github.com/alex/wirepost"
 license=('custom')
-provides=('mailer')
-conflicts=('mailer' 'mailer-git')
+provides=('wirepost')
+conflicts=('wirepost' 'wirepost-git')
 depends=('gcc-libs' 'openssl' 'ca-certificates')
-source=("mailer-linux-x86_64.tar.gz::https://github.com/alex/mailer/releases/download/v${pkgver}/mailer-linux-x86_64.tar.gz")
-noextract=('mailer-linux-x86_64.tar.gz')
+source=("wirepost-linux-x86_64.tar.gz::https://github.com/alex/wirepost/releases/download/v${pkgver}/wirepost-linux-x86_64.tar.gz")
+noextract=('wirepost-linux-x86_64.tar.gz')
 sha256sums=('SKIP')
 
 package() {
   cd "${srcdir}"
-  tar -xzf mailer-linux-x86_64.tar.gz
-  install -Dm755 mailer-linux-x86_64/mailer "${pkgdir}/usr/bin/mailer"
+  tar -xzf wirepost-linux-x86_64.tar.gz
+  install -Dm755 wirepost-linux-x86_64/wirepost "${pkgdir}/usr/bin/wirepost"
 }
