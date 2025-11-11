@@ -18,6 +18,7 @@ use lettre::{
     transport::smtp::authentication::Credentials,
 };
 use mime_guess::mime;
+use regex::Regex;
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -353,12 +354,23 @@ fn parse_vars(entries: &[String]) -> Result<TemplateVars> {
 }
 
 fn apply_template(input: &str, vars: &TemplateVars) -> String {
-    let mut rendered = input.to_string();
-    for (key, value) in vars {
-        let needle = format!("{{{{{key}}}}}");
-        rendered = rendered.replace(&needle, value);
+    if vars.is_empty() {
+        return input.to_string();
     }
-    rendered
+
+    let re = Regex::new(r"\{\{\s*([A-Za-z0-9_\-\.]+)\s*\}\}").expect("valid variable regex");
+
+    re.replace_all(input, |caps: &regex::Captures| {
+        let key = &caps[1];
+        if let Some(value) = vars.get(key) {
+            value.clone()
+        } else {
+            caps.get(0)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default()
+        }
+    })
+    .into_owned()
 }
 
 fn render_content(args: &Args, vars: &TemplateVars, sources: &BodySource) -> RenderedContent {

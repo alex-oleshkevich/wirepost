@@ -9,3 +9,4 @@ clap = { version = "4.5", features = ["derive"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "native-tls", "hostname", "dkim"] }
 mime_guess = "2"
 url = "2"
+regex = "1"
