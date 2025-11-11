@@ -31,12 +31,12 @@ jobs:
             package: wirepost-linux-aarch64.tar.gz
             binary_path: target/aarch64-unknown-linux-gnu/release/wirepost
           - name: macos-x86_64
-            os: macos-13
-            target: ""
+            os: macos-14
+            target: x86_64-apple-darwin
             use_cross: false
             artifact: wirepost-macos-x86_64
             package: wirepost-macos-x86_64.tar.gz
-            binary_path: target/release/wirepost
+            binary_path: target/x86_64-apple-darwin/release/wirepost
           - name: macos-aarch64
             os: macos-14
             target: ""
