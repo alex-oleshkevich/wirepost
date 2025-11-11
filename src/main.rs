@@ -161,17 +161,22 @@ fn main() -> Result<()> {
     if args.print {
         let output = message.formatted();
         println!("{}", String::from_utf8_lossy(&output));
+        log_verbose(
+            args.verbose,
+            "Skipping SMTP send because --print was provided",
+        );
+        return Ok(());
     }
 
     let mut builder = SmtpTransport::builder_dangerous(&conn.host).port(conn.port);
     if let Some(auth) = &conn.auth {
         builder = builder.credentials(Credentials::new(auth.user.clone(), auth.pass.clone()));
     }
-    let wirepost = builder.build();
+    let transport = builder.build();
 
-    send_with_retry(&wirepost, &message, &args)?;
+    send_with_retry(&transport, &message, &args)?;
 
-    println!("Ewirepost sent");
+    println!("Email sent");
     Ok(())
 }
 
