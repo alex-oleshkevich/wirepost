@@ -10,7 +10,7 @@ MAIL_FROM=ops@example.com \
 wirepost \
   --to dev@example.com --cc infra@example.com \
   --subject "Deploy {{env}} Notice" \
-  --text "Plain body for {{env}}" --html "<p>HTML body</p>" \
+  --text-file ./body.txt --html "<p>HTML body</p>" \
   --var env=production \
   --attach ./report.pdf \
   --header "X-Tracking: deploy-42" \
@@ -19,6 +19,8 @@ wirepost \
 ```
 
 `MAIL_URL` and `MAIL_FROM` act as fallbacks for `--dsn` and `--from`, letting you keep secrets out of shell history.
+
+Use `--text`/`--html` for inline bodies or `--text-file`/`--html-file` to pull content directly from disk before templating.
 
 ## DKIM
 

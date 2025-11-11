@@ -61,9 +61,15 @@ struct Args {
     /// Plain-text body
     #[arg(long)]
     text: Option<String>,
+    /// Plain-text body sourced from file
+    #[arg(long = "text-file")]
+    text_file: Option<PathBuf>,
     /// HTML body
     #[arg(long)]
     html: Option<String>,
+    /// HTML body sourced from file
+    #[arg(long = "html-file")]
+    html_file: Option<PathBuf>,
     /// File attachments (repeatable)
     #[arg(long = "attach", action = ArgAction::Append)]
     attachments: Vec<PathBuf>,
@@ -128,6 +134,11 @@ struct Auth {
     pass: String,
 }
 
+struct BodySource {
+    text: Option<String>,
+    html: Option<String>,
+}
+
 struct RenderedContent {
     subject: String,
     text: Option<String>,
@@ -144,7 +155,8 @@ fn main() -> Result<()> {
     }
 
     let vars = parse_vars(&args.vars)?;
-    let rendered = render_content(&args, &vars);
+    let sources = load_body_sources(&args)?;
+    let rendered = render_content(&args, &vars, &sources);
     let conn = resolve_connection(&args)?;
     let from = resolve_from(&args)?;
     log_verbose(
@@ -349,16 +361,42 @@ fn apply_template(input: &str, vars: &TemplateVars) -> String {
     rendered
 }
 
-fn render_content(args: &Args, vars: &TemplateVars) -> RenderedContent {
+fn render_content(args: &Args, vars: &TemplateVars, sources: &BodySource) -> RenderedContent {
     RenderedContent {
         subject: apply_template(&args.subject, vars),
-        text: args.text.as_ref().map(|text| apply_template(text, vars)),
-        html: args.html.as_ref().map(|html| apply_template(html, vars)),
+        text: sources.text.as_ref().map(|text| apply_template(text, vars)),
+        html: sources.html.as_ref().map(|html| apply_template(html, vars)),
         headers: args
             .headers
             .iter()
             .map(|header| apply_template(header, vars))
             .collect(),
+    }
+}
+
+fn load_body_sources(args: &Args) -> Result<BodySource> {
+    Ok(BodySource {
+        text: resolve_body_source("text", &args.text, &args.text_file)?,
+        html: resolve_body_source("html", &args.html, &args.html_file)?,
+    })
+}
+
+fn resolve_body_source(
+    label: &str,
+    inline: &Option<String>,
+    file: &Option<PathBuf>,
+) -> Result<Option<String>> {
+    match (inline, file) {
+        (Some(_), Some(_)) => Err(anyhow!(
+            "provide either --{label} or --{label}-file, not both"
+        )),
+        (Some(value), None) => Ok(Some(value.clone())),
+        (None, Some(path)) => {
+            let data = fs::read_to_string(path)
+                .with_context(|| format!("failed to read {label} body from {}", path.display()))?;
+            Ok(Some(data))
+        }
+        (None, None) => Ok(None),
     }
 }
 
